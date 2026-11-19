@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Generate resume.pdf</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 32rem; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }
+    button { font-size: 1rem; padding: 0.6rem 1.2rem; cursor: pointer; }
+    p { color: #444; font-size: 0.95rem; }
+    code { font-size: 0.85rem; }
+  </style>
+</head>
+<body>
+  <h1>Generate <code>resume.pdf</code></h1>
+  <p>Unduh PDF lalu simpan (ganti file) di folder ini: <code>assets/documents/resume.pdf</code></p>
+  <p><button type="button" id="download">Download resume.pdf</button></p>
+  <p>Alternatif: buka <a href="resume.html">resume.html</a> → Print (Ctrl+P) → Save as PDF.</p>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.2/jspdf.umd.min.js" crossorigin="anonymous"></script>
+  <script>
+    const { jsPDF } = window.jspdf;
+
+    const lines = [
+      { t: "Said Abdullah", s: 18, b: true },
+      { t: "Software Engineer", s: 11, b: true },
+      { t: "Malang, East Java, Indonesia  |  said.abdullah3@gmail.com  |  +62 852 3022 6810", s: 9 },
+      { t: "linkedin.com/in/said-abdullah-595045105", s: 9 },
+      { t: "SUMMARY", s: 10, b: true, gap: 6 },
+      { t: "Software engineer, 10+ years (Go, MongoDB, React)—analytics, MIS, data quality, reporting. Malang. EACIIT remote Sep 2020–Sep 2026. Earlier: C#/ASP.NET, Vue, Knockout/Kendo, SQL.", s: 9, wrap: true },
+      { t: "SKILLS", s: 10, b: true, gap: 6 },
+      { t: "Backend: Go, REST, WebSockets, C#, ASP.NET MVC, Java, PHP, Node.js", s: 9, wrap: true },
+      { t: "Frontend: React, Vue, JavaScript, HTML/CSS, Knockout.js, Kendo UI", s: 9, wrap: true },
+      { t: "Databases: MongoDB, MySQL, PostgreSQL, SQL Server  |  Python: FastAPI, LangGraph, AWS Bedrock", s: 9, wrap: true },
+      { t: "Data & ops: Drill, Hive, Solr, Git, Docker, Nginx, production support", s: 9, wrap: true },
+      { t: "EXPERIENCE", s: 10, b: true, gap: 6 },
+      { t: "Software Engineer — EACIIT  |  Sep 2020 – Sep 2026  |  Remote", s: 10, b: true },
+      { t: "Go/MongoDB/React — analytics, MIS, data quality, reporting.", s: 9 },
+      { t: "• JKLC: sales/dealer analytics—forecasting, KPI dashboards, pipelines (Go, React, MongoDB); Ask EPM via Python behind Go API.", s: 9, wrap: true },
+      { t: "• HML: MIS ingestion, validation, reconciliation, executive reporting.", s: 9, wrap: true },
+      { t: "• SmartDQ & DMT (Standard Chartered); AMALIA; Al Mansoori DDS; TBOMS; RIDE.", s: 9, wrap: true },
+      { t: "Software Engineer — PT KANO  |  Apr – Aug 2020  |  Surabaya", s: 10, b: true },
+      { t: "Full-stack with Go, MongoDB, and React.", s: 9 },
+      { t: "Software Engineer — PT Wiyasa Teknologi Nusantara  |  Feb 2016 – Mar 2020", s: 10, b: true },
+      { t: "REST APIs, React, MongoDB (Melon, Ostro, Nagarjuna, SCB Pay).", s: 9, wrap: true },
+      { t: "Staff Programmer — PT Epson Batam  |  Aug 2013 – Nov 2015", s: 10, b: true },
+      { t: "Enterprise web/mobile; C#, ASP.NET MVC, PHP, JavaScript.", s: 9 },
+      { t: "Programmer — CV Software Indonesia  |  Apr – Oct 2011  |  Malang", s: 10, b: true },
+      { t: "Java, PHP, JavaScript, MySQL.", s: 9 },
+      { t: "EDUCATION", s: 10, b: true, gap: 6 },
+      { t: "Bachelor's degree, Information Technology (S.Kom) — STMIK PPKIA Pradnya Paramita, Malang · 2006–2010 · GPA 3.11", s: 9, wrap: true },
+      { t: "SMK Telkom Darul Ulum, Jombang · 2003–2006", s: 9 },
+    ];
+
+    function buildPdf() {
+      const doc = new jsPDF({ unit: "mm", format: "a4" });
+      const margin = 16;
+      const maxW = 210 - margin * 2;
+      let y = 18;
+
+      for (const line of lines) {
+        if (line.gap) y += line.gap * 0.35;
+        doc.setFont("helvetica", line.b ? "bold" : "normal");
+        doc.setFontSize(line.s);
+        if (line.wrap) {
+          const parts = doc.splitTextToSize(line.t, maxW);
+          const h = parts.length * (line.s * 0.38);
+          if (y + h > 285) {
+            doc.addPage();
+            y = 18;
+          }
+          doc.text(parts, margin, y);
+          y += h + 1.5;
+        } else {
+          if (y > 285) {
+            doc.addPage();
+            y = 18;
+          }
+          doc.text(line.t, margin, y);
+          y += line.s * 0.42 + 1;
+        }
+      }
+      return doc;
+    }
+
+    document.getElementById("download").addEventListener("click", () => {
+      buildPdf().save("resume.pdf");
+    });
+  </script>
+</body>
+</html>

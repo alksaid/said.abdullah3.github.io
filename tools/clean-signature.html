@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <title>Bersihkan tanda tangan</title>
+  <style>
+    :root { color-scheme: light; }
+    body { margin: 0; font: 16px/1.5 "Segoe UI", sans-serif; background: #f4f1ec; color: #1c1917; }
+    main { max-width: 720px; margin: 0 auto; padding: 32px 20px 48px; }
+    h1 { font-size: 1.4rem; font-weight: 650; margin: 0 0 8px; }
+    p { margin: 0 0 16px; }
+    .drop { border: 1.5px dashed #a8a29e; border-radius: 12px; padding: 28px 16px; text-align: center; background: #fff; }
+    .drop.over { border-color: #1c1917; background: #fafaf9; }
+    input { margin-top: 12px; }
+    .row { display: flex; gap: 16px; margin-top: 20px; flex-wrap: wrap; }
+    figure { margin: 0; }
+    figcaption { font-size: 0.85rem; color: #57534e; margin-bottom: 6px; }
+    .stage { min-height: 140px; min-width: 220px; display: grid; place-items: center; border-radius: 10px; padding: 12px; }
+    .light { background: #f7f6f3; }
+    .dark { background: #171513; }
+    .checker { background-color: #fff; background-image: linear-gradient(45deg, #e7e5e4 25%, transparent 25%), linear-gradient(-45deg, #e7e5e4 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #e7e5e4 75%), linear-gradient(-45deg, transparent 75%, #e7e5e4 75%); background-size: 20px 20px; background-position: 0 0, 0 10px, 10px -10px, -10px 0; }
+    canvas { max-width: 280px; height: auto; }
+    .status { min-height: 1.5em; color: #44403c; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Hapus background kertas</h1>
+    <p>Lepaskan <code>signature-me.png</code> di kotak di bawah. Halaman ini memakai browser, bukan PowerShell, lalu mengunduh PNG transparan.</p>
+    <div class="drop" id="drop">
+      <div>Lepas file ke sini, atau pilih file</div>
+      <input id="file" type="file" accept="image/png,image/jpeg,image/webp">
+    </div>
+    <p class="status" id="status"></p>
+    <div class="row" id="preview" hidden>
+      <figure>
+        <figcaption>Transparan</figcaption>
+        <div class="stage checker"><canvas id="view"></canvas></div>
+      </figure>
+      <figure>
+        <figcaption>Di atas latar gelap</figcaption>
+        <div class="stage dark"><canvas id="viewDark"></canvas></div>
+      </figure>
+    </div>
+  </main>
+  <script>
+    const drop = document.getElementById("drop");
+    const fileInput = document.getElementById("file");
+    const status = document.getElementById("status");
+    const preview = document.getElementById("preview");
+
+    drop.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      drop.classList.add("over");
+    });
+    drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+    drop.addEventListener("drop", (event) => {
+      event.preventDefault();
+      drop.classList.remove("over");
+      const file = event.dataTransfer.files && event.dataTransfer.files[0];
+      if (file) cleanFile(file);
+    });
+    fileInput.addEventListener("change", () => {
+      if (fileInput.files[0]) cleanFile(fileInput.files[0]);
+    });
+
+    function luminance(r, g, b) {
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    }
+
+    function median(values) {
+      const sorted = values.slice().sort((a, b) => a - b);
+      return sorted[Math.floor(sorted.length / 2)] || 0;
+    }
+
+    function percentile(values, p) {
+      const sorted = values.slice().sort((a, b) => a - b);
+      const index = Math.min(sorted.length - 1, Math.max(0, Math.round((sorted.length - 1) * p)));
+      return sorted[index] || 0;
+    }
+
+    function sampleGrid(grid, gw, gh, cell, x, y) {
+      const gx = (x + 0.5) / cell - 0.5;
+      const gy = (y + 0.5) / cell - 0.5;
+      const x0 = Math.floor(gx);
+      const y0 = Math.floor(gy);
+      const tx = gx - x0;
+      const ty = gy - y0;
+      const at = (cx, cy) => {
+        const xx = Math.max(0, Math.min(gw - 1, cx));
+        const yy = Math.max(0, Math.min(gh - 1, cy));
+        return grid[yy * gw + xx];
+      };
+      const a = at(x0, y0) * (1 - tx) + at(x0 + 1, y0) * tx;
+      const b = at(x0, y0 + 1) * (1 - tx) + at(x0 + 1, y0 + 1) * tx;
+      return a * (1 - ty) + b * ty;
+    }
+
+    function removeSmallComponents(alpha, width, height, minSize) {
+      const seen = new Uint8Array(alpha.length);
+      const stack = [];
+      for (let start = 0; start < alpha.length; start++) {
+        if (seen[start] || alpha[start] < 18) continue;
+        stack.length = 0;
+        const comp = [];
+        stack.push(start);
+        seen[start] = 1;
+        while (stack.length) {
+          const p = stack.pop();
+          comp.push(p);
+          const x = p % width;
+          const y = (p - x) / width;
+          const next = [];
+          if (x > 0) next.push(p - 1);
+          if (x + 1 < width) next.push(p + 1);
+          if (y > 0) next.push(p - width);
+          if (y + 1 < height) next.push(p + width);
+          for (const n of next) {
+            if (!seen[n] && alpha[n] >= 18) {
+              seen[n] = 1;
+              stack.push(n);
+            }
+          }
+        }
+        if (comp.length < minSize) {
+          for (const p of comp) alpha[p] = 0;
+        }
+      }
+    }
+
+    function cleanImageData(image) {
+      const width = image.width;
+      const height = image.height;
+      const src = document.createElement("canvas");
+      src.width = width;
+      src.height = height;
+      const ctx = src.getContext("2d", { willReadFrequently: true });
+      ctx.drawImage(image, 0, 0);
+      const frame = ctx.getImageData(0, 0, width, height);
+      const rgba = frame.data;
+      const count = width * height;
+      const lum = new Float32Array(count);
+      for (let p = 0; p < count; p++) {
+        const o = p * 4;
+        lum[p] = luminance(rgba[o], rgba[o + 1], rgba[o + 2]);
+      }
+
+      const border = [];
+      const inset = Math.max(1, Math.floor(Math.min(width, height) * 0.01));
+      for (let x = 0; x < width; x++) {
+        border.push(lum[inset * width + x]);
+        border.push(lum[(height - 1 - inset) * width + x]);
+      }
+      for (let y = 0; y < height; y++) {
+        border.push(lum[y * width + inset]);
+        border.push(lum[y * width + (width - 1 - inset)]);
+      }
+      const paper = median(border);
+      const cell = Math.max(36, Math.round(Math.min(width, height) / 8));
+      const gw = Math.ceil(width / cell);
+      const gh = Math.ceil(height / cell);
+      const grid = new Float32Array(gw * gh);
+      for (let gy = 0; gy < gh; gy++) {
+        for (let gx = 0; gx < gw; gx++) {
+          const x0 = gx * cell;
+          const y0 = gy * cell;
+          const x1 = Math.min(width, x0 + cell);
+          const y1 = Math.min(height, y0 + cell);
+          const paperPixels = [];
+          for (let y = y0; y < y1; y++) {
+            for (let x = x0; x < x1; x++) {
+              const value = lum[y * width + x];
+              if (value >= paper - 28) paperPixels.push(value);
+            }
+          }
+          grid[gy * gw + gx] = paperPixels.length >= 12 ? percentile(paperPixels, 0.72) : paper;
+        }
+      }
+      const smooth = new Float32Array(grid.length);
+      for (let gy = 0; gy < gh; gy++) {
+        for (let gx = 0; gx < gw; gx++) {
+          let sum = 0;
+          let n = 0;
+          for (let dy = -1; dy <= 1; dy++) {
+            for (let dx = -1; dx <= 1; dx++) {
+              const xx = gx + dx;
+              const yy = gy + dy;
+              if (xx >= 0 && yy >= 0 && xx < gw && yy < gh) {
+                sum += grid[yy * gw + xx];
+                n++;
+              }
+            }
+          }
+          smooth[gy * gw + gx] = sum / n;
+        }
+      }
+
+      const alpha = new Uint8Array(count);
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const p = y * width + x;
+          const bg = Math.max(paper - 18, sampleGrid(smooth, gw, gh, cell, x, y));
+          const delta = bg - lum[p];
+          let a = 0;
+          if (delta <= 16) a = 0;
+          else if (delta >= 58) a = 255;
+          else a = Math.round(((delta - 16) / (58 - 16)) * 255);
+          alpha[p] = a;
+        }
+      }
+      removeSmallComponents(alpha, width, height, Math.max(12, Math.round(Math.min(width, height) * 0.012)));
+
+      let minX = width;
+      let minY = height;
+      let maxX = -1;
+      let maxY = -1;
+      let ink = 0;
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          if (alpha[y * width + x] > 20) {
+            ink++;
+            if (x < minX) minX = x;
+            if (y < minY) minY = y;
+            if (x > maxX) maxX = x;
+            if (y > maxY) maxY = y;
+          }
+        }
+      }
+      if (maxX < 0) throw new Error("Tinta tidak ditemukan");
+
+      const pad = Math.max(24, Math.round(Math.min(width, height) * 0.03));
+      minX = Math.max(0, minX - pad);
+      minY = Math.max(0, minY - pad);
+      maxX = Math.min(width - 1, maxX + pad);
+      maxY = Math.min(height - 1, maxY + pad);
+      const outW = maxX - minX + 1;
+      const outH = maxY - minY + 1;
+      const out = ctx.createImageData(outW, outH);
+      for (let y = 0; y < outH; y++) {
+        for (let x = 0; x < outW; x++) {
+          const a = alpha[(y + minY) * width + (x + minX)];
+          const o = (y * outW + x) * 4;
+          out.data[o] = 24;
+          out.data[o + 1] = 24;
+          out.data[o + 2] = 26;
+          out.data[o + 3] = a;
+        }
+      }
+      return { image: out, ink };
+    }
+
+    function paint(canvas, image) {
+      canvas.width = image.width;
+      canvas.height = image.height;
+      canvas.getContext("2d").putImageData(image, 0, 0);
+    }
+
+    async function cleanFile(file) {
+      status.textContent = "Memproses...";
+      preview.hidden = true;
+      const bitmap = await createImageBitmap(file);
+      let cleaned;
+      try {
+        cleaned = cleanImageData(bitmap);
+      } catch (error) {
+        status.textContent = error.message;
+        return;
+      }
+      paint(document.getElementById("view"), cleaned.image);
+      paint(document.getElementById("viewDark"), cleaned.image);
+      preview.hidden = false;
+      const blob = await new Promise((resolve) => document.getElementById("view").toBlob(resolve, "image/png"));
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = "signature-me.png";
+      link.click();
+      URL.revokeObjectURL(link.href);
+      status.textContent = "PNG transparan sudah diunduh. Ganti file assets/images/signature-me.png dengan unduhan itu.";
+    }
+  </script>
+</body>
+</html>
